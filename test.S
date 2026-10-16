@@ -13,6 +13,7 @@
 	.fmt_align_int_r:  .string "12) |%>5d|\n"
 	.fmt_pct:          .string "13) 100%%\n"
 	.fmt_negative:     .string "14) negative: %d\n"
+	.fmt_hexa_decimal	 .string "15) hexa-decimal %x\n"
 	
 	.str_hello:        .string "hello"
 	.str_world:        .string "world"
@@ -128,6 +129,14 @@ _start:
 	call	tiny_pf
 	addq	$8, %rsp
 
+	# 15) hexa-decimal
+	pushq $0x4F 	  # i.e $75 if not hexa-decimal formatted
+	movl  $1, %edi	  # added 1 because many other have it, find out later why
+	leaq  .fmt_hexa_decimal(%rip), %rsi
+	call  tiny_pf
+	addq  $8, %rsp
+
+	# 1) plain string (no variadic args)
 	# exit(0)
 	movq	$60, %rax
 	xorq	%rdi, %rdi
