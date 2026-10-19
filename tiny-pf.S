@@ -1,6 +1,6 @@
 #define _TINY_PF_BUFFER_CAPACITY        4096
 #define _TINY_PF_NUM_BUFFER_CAPACITY    32
-#define _TINY_PF_HEX_BUFFER_CAPACITY    16
+#define _TINY_PF_HEX_BUFFER_CAPACITY    20
 
 #define _TINY_PF_OFFSET_FD              -4
 #define _TINY_PF_OFFSET_FMT_STR         -12
@@ -37,6 +37,7 @@
 #define _TINY_PF_ASCII_NON_CTE_ALIGN    35
 #define _TINY_PF_ASCII_PADDING          32
 #define _TINY_PF_ASCII_BOOL_FMT         98
+#define _TINY_PF_ASCII_HEXDEC_FMT 		  120
 
 #define _TINY_PF_BASE_10                10
 #define _TINY_PF_BASE_16                16
@@ -212,8 +213,8 @@ tiny_pf:
 	je	._tiny_pf_loop_parse_int             #
 	cmpb	$_TINY_PF_ASCII_BOOL_FMT, %dil     #
 	je	._tiny_pf_loop_parse_bool            #
-	cmpb  $_TINY_PF_ASCII_HEXDEC_FMT, %dil	 #
-	je  ._tiny_pf_loop_parse_hexdec					 #
+	cmpb	$_TINY_PF_ASCII_HEXDEC_FMT, %dil	 #
+	je	._tiny_pf_loop_parse_hexdec					 #
 	# finding format -------------------------#
 	#
 	# [[no return]]
@@ -307,11 +308,14 @@ tiny_pf:
 ._tiny_pf_loop_parse_bool_send:
 	jmp	._tiny_pf_loop_parse_write_out
 ._tiny_pf_loop_parse_hexdec:
-	call  xvargs_next
-	movq  %rax, %rdi
-	leaq  -48(%rbp), %rdx
-	call _tiny_pf_function_numhex
-
+	call	xvargs_next
+	movq	%rax, %rdi
+	leaq	-48(%rbp), %rdx
+	call	_tiny_pf_function_numhex
+	movq	%rax, _TINY_PF_OFFSET_LAST_ARG_XVARGS(%rbp)
+	movq	%rbx, _TINY_PF_OFFSET_ARG_LENGTH(%rbp)
+	movl	$1, _TINY_PF_OFFSET_IS_ARG_PTR(%rbp)
+	jmp	._tiny_pf_loop_parse_write_out
 	# parse the hexa decimal number
 	
 #
@@ -621,41 +625,61 @@ _tiny_pf_function_numstr:
 	leave
 	ret
 
+# param: $rax (int) number we are converting to hex
+# returns: $rax (char*) pointer to the converted hex-str
+# returns: $rbx (int) length of the string
 _tiny_pf_function_numhex:
-	leaq ._tiny_pf_hex_buffer, %rsi
-	movq %rax, %r8
-	xorl %r9, %r9
-	addl $15, %r8
+	leaq	._tiny_pf_hex_buffer, %rsi
+	cmpq	$0, %rax
+	jle	.tiny_pf_function_numhex_iszero
+	movq	%rax, %r8
+	movq	$15, %r9
+	# maybe push the char* pointer ahead for appending
 .tiny_pf_function_numhex_loop:
-	# x = (hex_number(%r8) >> (4 * on_index(%rdi))) & 0xF
-	movq $4, %rbx
-	movq %r9, %rax
-	mulq %rbx
-	shlq %r8, %rax
-	andq $0xF, %rax
+	# x = (hex_number >> (4 * on_index)) & 0xF
+	movq	%r8, %rax
+	movq	%r9, %rcx
+	shlq	$2, %rcx
+	shrq	%cl, %rax
+	andq	$0xF, %rax
 	# check al validity
-	cmpb $10, %al
-	jae .tiny_pf_function_numhex_10above
+	cmpb	$10, %al
+	jae	.tiny_pf_function_numhex_10above
 	# make under 10
-	addb $'0', %al
-	movb %al, (%rsi)
-	decq %r8
-	incq %r9
-	incq %rsi
-	jmp .tiny_pf_function_numhex_loopcheck
+	addb	$'0', %al
+	jmp	.tiny_pf_function_numhex_loopcheck
 .tiny_pf_function_numhex_10above:
 	# make above 10
-	addb $'a', %al	
-	movb %al, (%rsi)
-	decq %r8
-	incq %r9
-	incq %rsi
+	addb	$'7', %al	
 	# continues into .tiny_pf_function_numhex_loopcheck
 .tiny_pf_function_numhex_loopcheck:
-	cmpq $15, %r9
-	jne .tiny_pf_function_numhex_loop	
-	leaq ._tiny_pf_hex_buffer, %rax
-	# run to first non-'0' char
-	# Make space in bss
-
+	movb	%al, (%rsi)
+	decq	%r9
+	incq	%rsi
+	cmpq	$0, %r9
+	jnl	.tiny_pf_function_numhex_loop
+	leaq	._tiny_pf_hex_buffer, %rax
+.tiny_pf_function_numhex_setptr_offset:
+	movb	(%rax), %bl
+	cmpb	$'0', %bl
+	jne	.tiny_pf_function_numhex_setprt_set
+	incq	%rax	
+	jmp	.tiny_pf_function_numhex_setptr_offset
+.tiny_pf_function_numhex_setprt_set:
+	xorq	%rbx, %rbx
+	movq	%rax, %rdx
+	.tiny_pf_function_numhex_gethexleng:
+	movb	(%rax), %cl
+	cmpb	$0, %cl
+	je	.tiny_pf_function_numhex_fini
+	incq	%rbx
+	incq	%rax
+	jmp	.tiny_pf_function_numhex_gethexleng
+.tiny_pf_function_numhex_fini:
+	movq	%rdx, %rax
+	ret
+.tiny_pf_function_numhex_iszero:
+	movb	$'0', (%rsi)
+	movq	%rsi, %rax
+	movq	$1, %rbx
 	ret
